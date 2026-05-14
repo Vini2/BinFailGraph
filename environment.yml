@@ -1,0 +1,24 @@
+name: binfailgraph
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - biopython
+  - bidict
+  - click
+  - jupyterlab
+  - loguru
+  - matplotlib
+  - networkx
+  - numpy
+  - pandas
+  - pip
+  - pycairo
+  - python-igraph
+  - scikit-learn
+  - seaborn
+  - xgboost
+  - pip:
+      - agtools==1.1.0
+      - shap>=0.45
+      - -e .

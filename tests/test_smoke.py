@@ -8,6 +8,8 @@ from binfailgraph.features import _all_kmers, _kmer_frequencies
 from binfailgraph.labels import make_contig_labels, task_frame
 from binfailgraph.modeling import (
     COMPARISON_FEATURE_SETS,
+    combined_dataset_metric_table,
+    combined_roc_curve_frame,
     compare_feature_sets,
     make_logistic_regression,
     evaluate_classifier,
@@ -140,3 +142,16 @@ def test_requested_feature_sets_are_available():
     assert set(comparison_table["feature_set"]) == set(COMPARISON_FEATURE_SETS)
     assert {"auroc", "auprc"}.issubset(comparison_table.columns)
     assert set(results) == set(COMPARISON_FEATURE_SETS)
+
+    combined_results = {"Sim-5G": results}
+    combined_table = combined_dataset_metric_table(
+        combined_results,
+        feature_sets=COMPARISON_FEATURE_SETS,
+    )
+    assert set(combined_table["feature_set"]) == set(COMPARISON_FEATURE_SETS)
+    assert {"auroc", "auprc", "n_test", "positive_rate"}.issubset(combined_table.columns)
+
+    curve = combined_roc_curve_frame(combined_results, feature_set="length_only")
+    assert {"fpr", "tpr", "threshold"}.issubset(curve.columns)
+    assert curve["fpr"].between(0, 1).all()
+    assert curve["tpr"].between(0, 1).all()

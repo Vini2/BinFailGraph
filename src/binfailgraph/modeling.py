@@ -479,7 +479,13 @@ def plot_roc_curve(
     if ax is None:
         _, ax = plt.subplots(figsize=(6, 5))
 
-    ax.plot(curve["fpr"], curve["tpr"], linewidth=2, label=f"{model_name} (AUROC={roc_auc:.3f})")
+    ax.step(
+        curve["fpr"],
+        curve["tpr"],
+        where="post",
+        linewidth=2,
+        label=f"{model_name} (AUROC={roc_auc:.3f})",
+    )
     ax.plot([0, 1], [0, 1], linestyle="--", color="0.5", linewidth=1, label="Random")
     ax.set_xlabel("False positive rate")
     ax.set_ylabel("True positive rate")
@@ -506,7 +512,13 @@ def plot_feature_set_roc_curves(
         curve = roc_curve_frame(result, target_col=target_col)
         roc_auc = auc(curve["fpr"], curve["tpr"])
         label = FEATURE_SET_LABELS.get(feature_set, feature_set)
-        ax.plot(curve["fpr"], curve["tpr"], linewidth=2, label=f"{label} (AUROC={roc_auc:.3f})")
+        ax.step(
+            curve["fpr"],
+            curve["tpr"],
+            where="post",
+            linewidth=2,
+            label=f"{label} (AUROC={roc_auc:.3f})",
+        )
 
     ax.plot([0, 1], [0, 1], linestyle="--", color="0.5", linewidth=1, label="Random")
     ax.set_xlabel("False positive rate")

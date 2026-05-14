@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from binfailgraph.datasets import discover_datasets
 from binfailgraph.features import build_feature_table
 from binfailgraph.features import _all_kmers, _kmer_frequencies
 from binfailgraph.labels import make_contig_labels, task_frame
@@ -15,7 +16,39 @@ from binfailgraph.modeling import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / "tests" / "data" / "Sim-5G"
+DATA_ROOT = ROOT / "tests" / "data"
+DATA = DATA_ROOT / "Sim-5G"
+
+
+def test_dataset_discovery_finds_current_examples():
+    datasets = discover_datasets(DATA_ROOT)
+    names = {dataset.name for dataset in datasets}
+
+    assert {"Sim-5G", "Sim-10G"}.issubset(names)
+    for dataset in datasets:
+        assert dataset.graph_file.exists()
+        assert dataset.contigs_file.exists()
+        assert dataset.contig_paths_file.exists()
+        assert dataset.ground_truth_file.exists()
+        assert dataset.bin_assignments_file.exists()
+
+
+def test_all_discovered_datasets_build_feature_tables():
+    for dataset in discover_datasets(DATA_ROOT):
+        raw_features = build_feature_table(
+            graph_file=dataset.graph_file,
+            contigs_file=dataset.contigs_file,
+            contig_paths_file=dataset.contig_paths_file,
+            ground_truth_file=dataset.ground_truth_file,
+            bin_assignments_file=dataset.bin_assignments_file,
+            include_kmers=False,
+        )
+        labelled = make_contig_labels(raw_features)
+        task = task_frame(labelled, task="misbin")
+
+        assert len(raw_features) > 0
+        assert raw_features["bin"].notna().sum() > 0
+        assert task["target"].nunique() == 2
 
 
 def test_feature_and_label_pipeline_smoke():

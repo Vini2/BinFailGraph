@@ -45,6 +45,8 @@ Each notebook now compares five feature sets with AUROC and AUPRC:
 - `graph_only`
 - `composition_coverage_graph`
 
+The ROC section shows one panel per dataset plus a combined ROC panel that pools held-out predictions across all discovered datasets for each feature set.
+
 ## Python API Sketch
 
 ```python

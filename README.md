@@ -1,4 +1,4 @@
-# BinFailGraph: Graph-Based Failure Prediction for Metagenomic Binning
+# Graph-Based Failure Prediction for Metagenomic Binning
 
 BinFailGraph is a diagnostic scaffold for asking:
 

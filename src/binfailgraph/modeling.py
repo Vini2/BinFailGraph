@@ -463,6 +463,90 @@ def roc_curve_frame(
     return pd.DataFrame({"fpr": fpr, "tpr": tpr, "threshold": thresholds})
 
 
+def combined_prediction_frame(
+    results_by_dataset: dict[str, dict[str, EvaluationResult]],
+    feature_set: str,
+    target_col: str = "target",
+) -> pd.DataFrame:
+    """Concatenate held-out predictions for one feature set across datasets."""
+
+    frames = []
+    for dataset_name, results in sorted(results_by_dataset.items()):
+        if feature_set not in results:
+            continue
+
+        predictions = results[feature_set].test_predictions[[target_col, "risk_score"]].copy()
+        predictions["dataset"] = dataset_name
+        predictions["feature_set"] = feature_set
+        predictions["feature_set_label"] = FEATURE_SET_LABELS.get(feature_set, feature_set)
+        frames.append(predictions)
+
+    if not frames:
+        raise ValueError(f"No held-out predictions found for feature_set={feature_set!r}.")
+
+    return pd.concat(frames, ignore_index=True)
+
+
+def combined_roc_curve_frame(
+    results_by_dataset: dict[str, dict[str, EvaluationResult]],
+    feature_set: str,
+    target_col: str = "target",
+) -> pd.DataFrame:
+    """Return ROC coordinates after pooling held-out predictions across datasets."""
+
+    combined = combined_prediction_frame(
+        results_by_dataset=results_by_dataset,
+        feature_set=feature_set,
+        target_col=target_col,
+    )
+    y_true = combined[target_col].astype(int)
+    y_score = combined["risk_score"]
+    if y_true.nunique() < 2:
+        raise ValueError("Combined ROC curve requires both positive and negative examples.")
+
+    fpr, tpr, thresholds = roc_curve(y_true, y_score)
+    return pd.DataFrame({"fpr": fpr, "tpr": tpr, "threshold": thresholds})
+
+
+def combined_dataset_metric_table(
+    results_by_dataset: dict[str, dict[str, EvaluationResult]],
+    feature_sets: list[str] | None = None,
+    target_col: str = "target",
+) -> pd.DataFrame:
+    """Compute AUROC and AUPRC after pooling held-out predictions across datasets."""
+
+    feature_sets = feature_sets or COMPARISON_FEATURE_SETS
+    rows = []
+    for feature_set in feature_sets:
+        combined = combined_prediction_frame(
+            results_by_dataset=results_by_dataset,
+            feature_set=feature_set,
+            target_col=target_col,
+        )
+        y_true = combined[target_col].astype(int)
+        y_score = combined["risk_score"]
+
+        if y_true.nunique() == 2:
+            auroc = roc_auc_score(y_true, y_score)
+            auprc = average_precision_score(y_true, y_score)
+        else:
+            auroc = np.nan
+            auprc = np.nan
+
+        rows.append(
+            {
+                "feature_set": feature_set,
+                "feature_set_label": FEATURE_SET_LABELS.get(feature_set, feature_set),
+                "n_test": len(combined),
+                "positive_rate": float(y_true.mean()),
+                "auroc": auroc,
+                "auprc": auprc,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 def plot_roc_curve(
     result: EvaluationResult,
     model_name: str = "model",
@@ -524,6 +608,46 @@ def plot_feature_set_roc_curves(
     ax.set_xlabel("False positive rate")
     ax.set_ylabel("True positive rate")
     ax.set_title("Held-out ROC curves by feature set")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.legend(loc="lower right")
+    return ax
+
+
+def plot_combined_dataset_roc_curves(
+    results_by_dataset: dict[str, dict[str, EvaluationResult]],
+    feature_sets: list[str] | None = None,
+    ax=None,
+    target_col: str = "target",
+):
+    """Plot empirical ROC curves after pooling held-out predictions across datasets."""
+
+    import matplotlib.pyplot as plt
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(7, 6))
+
+    feature_sets = feature_sets or COMPARISON_FEATURE_SETS
+    for feature_set in feature_sets:
+        curve = combined_roc_curve_frame(
+            results_by_dataset=results_by_dataset,
+            feature_set=feature_set,
+            target_col=target_col,
+        )
+        roc_auc = auc(curve["fpr"], curve["tpr"])
+        label = FEATURE_SET_LABELS.get(feature_set, feature_set)
+        ax.step(
+            curve["fpr"],
+            curve["tpr"],
+            where="post",
+            linewidth=2,
+            label=f"{label} (AUROC={roc_auc:.3f})",
+        )
+
+    ax.plot([0, 1], [0, 1], linestyle="--", color="0.5", linewidth=1, label="Random")
+    ax.set_xlabel("False positive rate")
+    ax.set_ylabel("True positive rate")
+    ax.set_title("Combined held-out ROC curves by feature set")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.legend(loc="lower right")

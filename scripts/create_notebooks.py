@@ -34,7 +34,9 @@ from binfailgraph.features import build_feature_table
 from binfailgraph.labels import make_contig_labels, task_frame
 from binfailgraph.modeling import (
     COMPARISON_FEATURE_SETS,
+    combined_dataset_metric_table,
     compare_feature_sets,
+    plot_combined_dataset_roc_curves,
     plot_feature_set_roc_curves,
     select_feature_columns,
 )
@@ -155,6 +157,29 @@ plt.show()
 """
 
 
+PLOT_COMBINED_ROC = r"""
+combined_table = combined_dataset_metric_table(
+    comparison_results_by_dataset,
+    feature_sets=COMPARISON_FEATURE_SETS,
+)
+display(
+    combined_table[
+        ["feature_set_label", "n_test", "positive_rate", "auroc", "auprc"]
+    ].style.format({"positive_rate": "{:.3f}", "auroc": "{:.3f}", "auprc": "{:.3f}"})
+)
+
+fig, ax = plt.subplots(figsize=(7, 6))
+plot_combined_dataset_roc_curves(
+    comparison_results_by_dataset,
+    feature_sets=COMPARISON_FEATURE_SETS,
+    ax=ax,
+)
+ax.set_title("All datasets: combined held-out ROC curves")
+plt.tight_layout()
+plt.show()
+"""
+
+
 SHAP_LOGISTIC = r"""
 try:
     import shap
@@ -210,6 +235,12 @@ def notebook(title: str, model_cell: str, extra_cells: list[tuple[str, str]] | N
         nbf.v4.new_code_cell(COMPARE_FEATURE_SETS.strip()),
         nbf.v4.new_markdown_cell("## ROC Curves"),
         nbf.v4.new_code_cell(PLOT_COMPARISON_ROC.strip()),
+        nbf.v4.new_markdown_cell(
+            "## Combined ROC Curves Across Datasets\n\n"
+            "These curves pool the held-out predictions from each dataset-specific run "
+            "for the same feature set."
+        ),
+        nbf.v4.new_code_cell(PLOT_COMBINED_ROC.strip()),
         nbf.v4.new_markdown_cell("## Full Feature-Set Importance"),
         nbf.v4.new_code_cell(PLOT_IMPORTANCE.strip()),
     ]

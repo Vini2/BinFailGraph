@@ -15,6 +15,7 @@ dependencies:
   - pip
   - pycairo
   - python-igraph
+  - scipy
   - scikit-learn
   - seaborn
   - xgboost

@@ -47,11 +47,16 @@ LABEL_COLUMNS = {
     "bin_is_contaminated",
 }
 
-BASELINE_PREFIXES = ("kmer4_",)
+RAW_KMER_PREFIXES = ("kmer4_",)
+INTERNAL_FEATURE_COLUMNS = {
+    "coverage",
+}
+BASELINE_PREFIXES: tuple[str, ...] = ()
 BASELINE_COLUMNS = {
     "length",
-    "coverage",
+    "coverage_difference",
     "gc_content",
+    "4mer_composition_distance",
 }
 
 COMPARISON_FEATURE_SETS = [
@@ -64,14 +69,15 @@ COMPARISON_FEATURE_SETS = [
 
 FEATURE_SET_LABELS = {
     "length_only": "Length only",
-    "coverage_only": "Coverage only",
-    "composition_coverage": "Composition + coverage",
+    "coverage_only": "Coverage difference only",
+    "composition_coverage": "Composition + coverage difference",
     "graph_only": "Graph only",
-    "composition_coverage_graph": "Composition + coverage + graph",
+    "composition_coverage_graph": "Composition + coverage difference + graph",
 }
 
 COMPOSITION_COLUMNS = {
     "gc_content",
+    "4mer_composition_distance",
 }
 
 GRAPH_STRUCTURE_COLUMNS = {
@@ -146,6 +152,29 @@ class EvaluationResult:
     test_predictions: pd.DataFrame
 
 
+def combined_task_frame(
+    frames_by_dataset: dict[str, pd.DataFrame],
+    target_col: str = "target",
+) -> pd.DataFrame:
+    """Pool labelled task rows across datasets and add dataset/outcome columns."""
+
+    frames = []
+    for dataset_name, frame in sorted(frames_by_dataset.items()):
+        current = frame.copy()
+        current["dataset"] = dataset_name
+        current["binning_outcome"] = np.where(
+            current[target_col].astype(int) == 1,
+            "Correct",
+            "Failed",
+        )
+        frames.append(current)
+
+    if not frames:
+        raise ValueError("No dataset task frames were provided.")
+
+    return pd.concat(frames, ignore_index=True)
+
+
 def select_feature_columns(
     frame: pd.DataFrame,
     feature_set: str = "graph",
@@ -160,7 +189,7 @@ def select_feature_columns(
     """
 
     numeric_columns = set(frame.select_dtypes(include=[np.number, "bool"]).columns)
-    excluded = IDENTIFIER_COLUMNS | LABEL_COLUMNS | {target_col}
+    excluded = IDENTIFIER_COLUMNS | LABEL_COLUMNS | INTERNAL_FEATURE_COLUMNS | {target_col}
     candidate_columns = sorted(numeric_columns - excluded)
 
     def is_baseline(column: str) -> bool:
@@ -172,19 +201,19 @@ def select_feature_columns(
     if feature_set == "length_only":
         allowed = [column for column in candidate_columns if column == "length"]
     elif feature_set == "coverage_only":
-        allowed = [column for column in candidate_columns if column == "coverage"]
+        allowed = [column for column in candidate_columns if column == "coverage_difference"]
     elif feature_set == "composition_coverage":
         allowed = [
             column
             for column in candidate_columns
-            if column == "coverage" or is_composition(column)
+            if column == "coverage_difference" or is_composition(column)
         ]
     elif feature_set == "graph_only":
         graph_only_columns = GRAPH_STRUCTURE_COLUMNS | GRAPH_BIN_CONTEXT_COLUMNS
         allowed = [column for column in candidate_columns if column in graph_only_columns]
     elif feature_set == "composition_coverage_graph":
         full_columns = (
-            {"coverage"}
+            {"coverage_difference"}
             | COMPOSITION_COLUMNS
             | GRAPH_STRUCTURE_COLUMNS
             | GRAPH_AMBIGUITY_COLUMNS
@@ -229,6 +258,126 @@ def select_feature_columns(
         for column in allowed
         if (column not in ORACLE_COLUMNS or feature_set == "oracle") and frame[column].notna().any()
     ]
+
+
+def comparison_feature_columns(
+    frame: pd.DataFrame,
+    feature_sets: list[str] | None = None,
+    target_col: str = "target",
+    exclude_prefixes: tuple[str, ...] = RAW_KMER_PREFIXES,
+) -> list[str]:
+    """Return comparison features after dropping raw high-dimensional k-mer columns."""
+
+    feature_sets = feature_sets or COMPARISON_FEATURE_SETS
+    columns = []
+    seen = set()
+    for feature_set in feature_sets:
+        for column in select_feature_columns(frame, feature_set=feature_set, target_col=target_col):
+            if column in seen or any(column.startswith(prefix) for prefix in exclude_prefixes):
+                continue
+            seen.add(column)
+            columns.append(column)
+    return columns
+
+
+non_kmer_comparison_feature_columns = comparison_feature_columns
+
+
+def significance_stars(p_value: float) -> str:
+    """Map a p-value to the usual significance-star label."""
+
+    if not np.isfinite(p_value):
+        return "n/a"
+    if p_value <= 1e-4:
+        return "****"
+    if p_value <= 1e-3:
+        return "***"
+    if p_value <= 1e-2:
+        return "**"
+    if p_value <= 5e-2:
+        return "*"
+    return "ns"
+
+
+def _benjamini_hochberg(p_values: pd.Series) -> pd.Series:
+    """Benjamini-Hochberg FDR adjustment for a p-value series."""
+
+    adjusted = pd.Series(np.nan, index=p_values.index, dtype=float)
+    valid = p_values.replace([np.inf, -np.inf], np.nan).dropna()
+    if valid.empty:
+        return adjusted
+
+    order = np.argsort(valid.to_numpy())
+    ordered = valid.to_numpy()[order]
+    n_tests = len(ordered)
+    ranks = np.arange(1, n_tests + 1)
+    adjusted_ordered = ordered * n_tests / ranks
+    adjusted_ordered = np.minimum.accumulate(adjusted_ordered[::-1])[::-1]
+    adjusted_ordered = np.clip(adjusted_ordered, 0.0, 1.0)
+    adjusted.loc[valid.index[order]] = adjusted_ordered
+    return adjusted
+
+
+def feature_outcome_significance_table(
+    frame: pd.DataFrame,
+    feature_columns: list[str],
+    target_col: str = "target",
+    p_adjust: str | None = "fdr_bh",
+) -> pd.DataFrame:
+    """Test correct-vs-failed feature shifts with two-sided Mann-Whitney U tests."""
+
+    try:
+        from scipy.stats import mannwhitneyu
+    except ImportError as exc:
+        raise ImportError("scipy is required to compute feature-distribution significance.") from exc
+
+    rows = []
+    target = frame[target_col].astype(int)
+    for feature in feature_columns:
+        if feature not in frame.columns:
+            continue
+
+        values = pd.to_numeric(frame[feature], errors="coerce").replace([np.inf, -np.inf], np.nan)
+        correct = values[target == 1].dropna()
+        failed = values[target == 0].dropna()
+
+        p_value = np.nan
+        statistic = np.nan
+        if not correct.empty and not failed.empty:
+            try:
+                test = mannwhitneyu(correct, failed, alternative="two-sided")
+            except TypeError:
+                test = mannwhitneyu(correct, failed)
+            statistic = float(test.statistic)
+            p_value = float(test.pvalue)
+
+        rows.append(
+            {
+                "feature": feature,
+                "n_correct": len(correct),
+                "n_failed": len(failed),
+                "median_correct": float(correct.median()) if not correct.empty else np.nan,
+                "median_failed": float(failed.median()) if not failed.empty else np.nan,
+                "mannwhitney_u": statistic,
+                "p_value": p_value,
+            }
+        )
+
+    table = pd.DataFrame(rows)
+    if table.empty:
+        return table
+
+    if p_adjust == "fdr_bh":
+        table["p_value_adj"] = _benjamini_hochberg(table["p_value"])
+        star_values = table["p_value_adj"]
+    elif p_adjust in {None, "none"}:
+        table["p_value_adj"] = np.nan
+        star_values = table["p_value"]
+    else:
+        raise ValueError("p_adjust must be 'fdr_bh', 'none', or None.")
+
+    table["significance"] = [significance_stars(p_value) for p_value in star_values]
+    return table
 
 
 def make_logistic_regression(random_state: int = 42) -> Pipeline:
@@ -327,7 +476,7 @@ def precision_recall_at_top_k(y_true, y_score, top_k_fraction: float = 0.1) -> t
     return float(precision), float(recall)
 
 
-def _predict_failure_probability(model: Pipeline, x_test: pd.DataFrame) -> np.ndarray:
+def _predict_correctness_probability(model: Pipeline, x_test: pd.DataFrame) -> np.ndarray:
     if hasattr(model, "predict_proba"):
         return model.predict_proba(x_test)[:, 1]
     decision = model.decision_function(x_test)
@@ -357,7 +506,7 @@ def evaluate_classifier(
     random_state: int = 42,
     top_k_fraction: float = 0.1,
 ) -> EvaluationResult:
-    """Train/test evaluate a binary classifier for failure risk."""
+    """Train/test evaluate a binary classifier for correct initial assignments."""
 
     model_frame = frame.dropna(subset=[target_col]).copy()
     x = model_frame[feature_columns]
@@ -374,13 +523,13 @@ def evaluate_classifier(
     )
 
     model.fit(x_train, y_train)
-    y_score = _predict_failure_probability(model, x_test)
+    y_score = _predict_correctness_probability(model, x_test)
     y_pred = (y_score >= 0.5).astype(int)
 
     metrics = {
         "n_train": len(y_train),
         "n_test": len(y_test),
-        "positive_rate_test": float(y_test.mean()),
+        "correct_rate_test": float(y_test.mean()),
         "f1": f1_score(y_test, y_pred, zero_division=0),
         "precision": precision_score(y_test, y_pred, zero_division=0),
         "ece_10bin": expected_calibration_error(y_test, y_score, n_bins=10),
@@ -397,8 +546,8 @@ def evaluate_classifier(
     metrics[f"recall_at_top_{int(top_k_fraction * 100)}pct"] = recall_top
 
     predictions = model_frame.loc[idx_test, ["contig", "contig_short", target_col]].copy()
-    predictions["risk_score"] = y_score
-    predictions = predictions.sort_values("risk_score", ascending=False)
+    predictions["correctness_score"] = y_score
+    predictions = predictions.sort_values("correctness_score", ascending=False)
 
     return EvaluationResult(
         model=model,
@@ -455,7 +604,7 @@ def roc_curve_frame(
     """Return held-out ROC curve coordinates for an evaluation result."""
 
     y_true = result.test_predictions[target_col].astype(int)
-    y_score = result.test_predictions["risk_score"]
+    y_score = result.test_predictions["correctness_score"]
     if y_true.nunique() < 2:
         raise ValueError("ROC curve requires both positive and negative examples in the test set.")
 
@@ -475,7 +624,7 @@ def combined_prediction_frame(
         if feature_set not in results:
             continue
 
-        predictions = results[feature_set].test_predictions[[target_col, "risk_score"]].copy()
+        predictions = results[feature_set].test_predictions[[target_col, "correctness_score"]].copy()
         predictions["dataset"] = dataset_name
         predictions["feature_set"] = feature_set
         predictions["feature_set_label"] = FEATURE_SET_LABELS.get(feature_set, feature_set)
@@ -500,7 +649,7 @@ def combined_roc_curve_frame(
         target_col=target_col,
     )
     y_true = combined[target_col].astype(int)
-    y_score = combined["risk_score"]
+    y_score = combined["correctness_score"]
     if y_true.nunique() < 2:
         raise ValueError("Combined ROC curve requires both positive and negative examples.")
 
@@ -524,7 +673,7 @@ def combined_dataset_metric_table(
             target_col=target_col,
         )
         y_true = combined[target_col].astype(int)
-        y_score = combined["risk_score"]
+        y_score = combined["correctness_score"]
 
         if y_true.nunique() == 2:
             auroc = roc_auc_score(y_true, y_score)
@@ -538,13 +687,149 @@ def combined_dataset_metric_table(
                 "feature_set": feature_set,
                 "feature_set_label": FEATURE_SET_LABELS.get(feature_set, feature_set),
                 "n_test": len(combined),
-                "positive_rate": float(y_true.mean()),
+                "correct_rate": float(y_true.mean()),
                 "auroc": auroc,
                 "auprc": auprc,
             }
         )
 
     return pd.DataFrame(rows)
+
+
+def plot_feature_boxplots_by_outcome(
+    frame: pd.DataFrame,
+    feature_columns: list[str],
+    target_col: str = "target",
+    features_per_figure: int = 12,
+    ncols: int = 3,
+    showfliers: bool = False,
+    p_adjust: str | None = "fdr_bh",
+):
+    """Plot paged boxplots comparing correct and failed contigs for each feature."""
+
+    import matplotlib.pyplot as plt
+
+    if not feature_columns:
+        raise ValueError("No feature columns were provided for plotting.")
+
+    plot_frame = frame.dropna(subset=[target_col]).copy()
+    if "binning_outcome" not in plot_frame.columns:
+        plot_frame["binning_outcome"] = np.where(
+            plot_frame[target_col].astype(int) == 1,
+            "Correct",
+            "Failed",
+        )
+
+    available = [
+        column
+        for column in feature_columns
+        if column in plot_frame.columns and plot_frame[column].notna().any()
+    ]
+    if not available:
+        raise ValueError("None of the requested feature columns are available for plotting.")
+
+    features_per_figure = max(1, features_per_figure)
+    ncols = max(1, ncols)
+    figures = []
+    colors = ["#60a5fa", "#f87171"]
+    significance = feature_outcome_significance_table(
+        plot_frame,
+        available,
+        target_col=target_col,
+        p_adjust=p_adjust,
+    ).set_index("feature")
+
+    for page_start in range(0, len(available), features_per_figure):
+        chunk = available[page_start : page_start + features_per_figure]
+        nrows = int(np.ceil(len(chunk) / ncols))
+        fig, axes = plt.subplots(
+            nrows=nrows,
+            ncols=ncols,
+            figsize=(4.2 * ncols, 3.2 * nrows),
+            squeeze=False,
+        )
+
+        for ax, feature in zip(axes.ravel(), chunk):
+            values = pd.to_numeric(plot_frame[feature], errors="coerce").replace(
+                [np.inf, -np.inf],
+                np.nan,
+            )
+            correct = values[plot_frame[target_col].astype(int) == 1].dropna()
+            failed = values[plot_frame[target_col].astype(int) == 0].dropna()
+
+            if correct.empty or failed.empty:
+                ax.text(0.5, 0.5, "insufficient data", ha="center", va="center")
+                ax.set_axis_off()
+                continue
+
+            box = ax.boxplot(
+                [correct, failed],
+                patch_artist=True,
+                showfliers=showfliers,
+                widths=0.6,
+            )
+            for patch, color in zip(box["boxes"], colors):
+                patch.set_facecolor(color)
+                patch.set_alpha(0.75)
+            for median in box["medians"]:
+                median.set_color("#111827")
+                median.set_linewidth(1.4)
+
+            row = significance.loc[feature]
+            p_value_column = "p_value_adj" if p_adjust == "fdr_bh" else "p_value"
+            p_value = row[p_value_column]
+            p_label = "q" if p_adjust == "fdr_bh" else "p"
+            if np.isfinite(p_value):
+                p_text = f"{p_label}={p_value:.2g}"
+            else:
+                p_text = f"{p_label}=n/a"
+
+            y_min, y_max = ax.get_ylim()
+            y_span = y_max - y_min
+            if not np.isfinite(y_span) or y_span <= 0:
+                y_span = max(abs(y_max), 1.0)
+            bracket_y = y_max + 0.06 * y_span
+            bracket_h = 0.04 * y_span
+            text_y = bracket_y + bracket_h + 0.015 * y_span
+            ax.plot(
+                [1, 1, 2, 2],
+                [bracket_y, bracket_y + bracket_h, bracket_y + bracket_h, bracket_y],
+                color="#111827",
+                linewidth=1.0,
+            )
+            ax.text(
+                1.5,
+                text_y,
+                f"{row['significance']}\n{p_text}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                fontweight="bold",
+                linespacing=0.9,
+            )
+            ax.set_ylim(y_min, text_y + 0.12 * y_span)
+            ax.set_title(feature, fontsize=10)
+            ax.set_xticks([1, 2])
+            ax.set_xticklabels(
+                [f"Correct\nn={len(correct)}", f"Failed\nn={len(failed)}"],
+                fontsize=9,
+            )
+            ax.set_ylabel("value")
+            ax.grid(axis="y", alpha=0.25)
+
+        for ax in axes.ravel()[len(chunk) :]:
+            ax.set_axis_off()
+
+        page_number = page_start // features_per_figure + 1
+        page_count = int(np.ceil(len(available) / features_per_figure))
+        fig.suptitle(
+            f"Correct vs failed contigs: comparison features ({page_number}/{page_count})",
+            fontsize=13,
+        )
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
+        figures.append(fig)
+
+    return figures
 
 
 def plot_roc_curve(

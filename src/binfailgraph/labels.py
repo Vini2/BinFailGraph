@@ -98,19 +98,20 @@ def task_frame(
     """Return rows and target column for a paper task.
 
     ``task="misbin"`` keeps binned contigs with truth labels and predicts
-    correct versus incorrect bin membership. ``task="failure"`` keeps all
-    contigs with truth labels and predicts success versus failure.
+    correct versus incorrect bin membership. The target convention is
+    ``1 = correct`` and ``0 = incorrect``. ``task="failure"`` keeps all
+    contigs with truth labels and uses ``1 = success`` and ``0 = failure``.
     """
 
     if task == "misbin":
         subset = labelled_table.loc[
             labelled_table["is_known_truth"] & labelled_table["is_binned"]
         ].copy()
-        subset[target_col] = subset["label_misbin"].astype(int)
+        subset[target_col] = subset["correctly_binned"].astype(int)
         return subset
     if task == "failure":
         subset = labelled_table.loc[labelled_table["is_known_truth"]].copy()
-        subset[target_col] = subset["label_failure"].astype(int)
+        subset[target_col] = subset["label_success"].astype(int)
         return subset
     raise ValueError("task must be 'misbin' or 'failure'")
 
@@ -129,4 +130,3 @@ def summarize_labels(labelled_table: pd.DataFrame) -> pd.Series:
     ]
     present = [column for column in columns if column in labelled_table]
     return labelled_table[present].sum(numeric_only=True)
-

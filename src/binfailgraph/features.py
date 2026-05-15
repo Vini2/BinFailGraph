@@ -55,6 +55,61 @@ def _kmer_frequencies(sequence: str, kmers: list[str], k: int = DEFAULT_K) -> di
     return {f"kmer{k}_{kmer}": counts[kmer] / valid for kmer in kmers}
 
 
+def _kmer_columns(frame: pd.DataFrame, k: int = DEFAULT_K) -> list[str]:
+    return [column for column in frame.columns if column.startswith(f"kmer{k}_")]
+
+
+def _bin_kmer_composition_distance(frame: pd.DataFrame, k: int = DEFAULT_K) -> pd.DataFrame:
+    """Distance from each contig's 4-mer vector to its assigned bin centroid."""
+
+    out = pd.DataFrame({"contig": frame["contig"], "4mer_composition_distance": np.nan})
+    kmer_columns = _kmer_columns(frame, k=k)
+    if "bin" not in frame or not kmer_columns:
+        return out
+
+    binned = frame.loc[frame["bin"].notna(), ["contig", "bin", *kmer_columns]].copy()
+    if binned.empty:
+        return out
+
+    vectors = binned[kmer_columns].to_numpy(dtype=float)
+    vectors = np.nan_to_num(vectors, nan=0.0, posinf=0.0, neginf=0.0)
+    centroids = binned.groupby("bin", dropna=True)[kmer_columns].transform("mean").to_numpy(dtype=float)
+    centroids = np.nan_to_num(centroids, nan=0.0, posinf=0.0, neginf=0.0)
+
+    distances = np.linalg.norm(vectors - centroids, axis=1)
+    distances_by_contig = pd.DataFrame(
+        {
+            "contig": binned["contig"].to_numpy(),
+            "4mer_composition_distance": distances,
+        }
+    )
+    out = out.drop(columns=["4mer_composition_distance"]).merge(distances_by_contig, on="contig", how="left")
+    return out
+
+
+def _bin_coverage_difference(frame: pd.DataFrame) -> pd.DataFrame:
+    """Absolute coverage difference from each contig to its assigned bin mean."""
+
+    out = pd.DataFrame({"contig": frame["contig"], "coverage_difference": np.nan})
+    if "bin" not in frame or "coverage" not in frame:
+        return out
+
+    binned = frame.loc[frame["bin"].notna(), ["contig", "bin", "coverage"]].copy()
+    if binned.empty:
+        return out
+
+    coverage = pd.to_numeric(binned["coverage"], errors="coerce")
+    bin_mean = coverage.groupby(binned["bin"], dropna=True).transform("mean")
+    difference_by_contig = pd.DataFrame(
+        {
+            "contig": binned["contig"].to_numpy(),
+            "coverage_difference": (coverage - bin_mean).abs().to_numpy(dtype=float),
+        }
+    )
+    out = out.drop(columns=["coverage_difference"]).merge(difference_by_contig, on="contig", how="left")
+    return out
+
+
 def _safe_entropy(values: pd.Series) -> float:
     clean = values.dropna()
     if clean.empty:
@@ -197,7 +252,7 @@ def _neighbor_numeric_features(
     coverage = frame["coverage"].astype(float).to_numpy()
     gc = frame["gc_content"].astype(float).to_numpy()
 
-    kmer_columns = [column for column in frame.columns if column.startswith(f"kmer{k}_")]
+    kmer_columns = _kmer_columns(frame, k=k)
     kmer_matrix = frame[kmer_columns].to_numpy(dtype=float) if include_kmers and kmer_columns else None
 
     records = []
@@ -375,5 +430,10 @@ def build_feature_table(
 
     if "bin" in frame:
         frame = frame.merge(_bin_output_features(graph, frame), on="contig", how="left")
+        frame = frame.merge(_bin_coverage_difference(frame), on="contig", how="left")
+
+    if include_kmers:
+        frame = frame.merge(_bin_kmer_composition_distance(frame, k=k), on="contig", how="left")
+        frame = frame.drop(columns=_kmer_columns(frame, k=k), errors="ignore")
 
     return frame

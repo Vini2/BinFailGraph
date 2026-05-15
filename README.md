@@ -35,17 +35,19 @@ To add another dataset later, create a new subdirectory under `tests/data/` with
 - `notebooks/02_random_forest.ipynb`
 - `notebooks/03_xgboost.ipynb`
 
-Each notebook runs the same feature/label pipeline on every discovered dataset and swaps only the model. The default task is `misbin`: among contigs present in `initial_contig_bins.csv`, predict `target=1` for an incorrect initial bin assignment and `target=0` for a correct assignment.
+Each notebook runs the same feature/label pipeline on every discovered dataset and swaps only the model. The default task is `misbin`: among contigs present in `initial_contig_bins.csv`, predict `target=0` for an incorrect initial bin assignment and `target=1` for a correct assignment.
 
 Each notebook now compares five feature sets with AUROC and AUPRC:
 
-- `length_only`
-- `coverage_only`
-- `composition_coverage`
+- `length_only`: contig length only
+- `coverage_only`: within-bin `coverage_difference` only
+- `composition_coverage`: GC content, `4mer_composition_distance`, and `coverage_difference`
 - `graph_only`
-- `composition_coverage_graph`
+- `composition_coverage_graph`: composition, coverage-difference, graph-topology, and graph/bin-context features
 
 The ROC section shows one panel per dataset plus a combined ROC panel that pools held-out predictions across all discovered datasets for each feature set.
+
+The feature-distribution section pools all discovered datasets and plots correct-vs-failed boxplots for every comparison feature. Raw 136-dimensional 4-mer vectors are collapsed into one `4mer_composition_distance` feature: the Euclidean distance from each contig's canonical tetranucleotide-frequency vector to the centroid of contigs in the same initial bin. Raw coverage is represented for modeling as `coverage_difference`: the absolute difference between a contig's coverage and the mean coverage of contigs in the same initial bin. Significance asterisks are based on two-sided Mann-Whitney U tests with Benjamini-Hochberg FDR correction.
 
 ## Python API Sketch
 
@@ -68,4 +70,4 @@ for dataset in discover_datasets(Path("tests/data")):
     misbin_task = task_frame(labelled, task="misbin")
 ```
 
-`misbin_task["target"]` is the contig-level correctness target for the initial binning: `1` means incorrect, `0` means correct.
+`misbin_task["target"]` is the contig-level correctness target for the initial binning: `0` means incorrect, `1` means correct.

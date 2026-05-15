@@ -221,3 +221,6 @@ __marimo__/
 # .DS_Store folders in Mac
 .DS_Store
 ./**/.DS_Store
+
+
+scripts/

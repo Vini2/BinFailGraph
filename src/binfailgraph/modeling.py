@@ -697,6 +697,190 @@ def combined_dataset_metric_table(
     return pd.DataFrame(rows)
 
 
+def transfer_feature_set_table(
+    frames_by_dataset: dict[str, pd.DataFrame],
+    model_factory,
+    feature_set: str = "composition_coverage_graph",
+    target_col: str = "target",
+    test_size: float = 0.3,
+    random_state: int = 42,
+) -> pd.DataFrame:
+    """Evaluate dataset-to-dataset transfer for one feature set.
+
+    Diagonal cells use a held-out split within the dataset. Off-diagonal cells
+    fit on all labelled rows from the source dataset and evaluate on all
+    labelled rows from the target dataset.
+    """
+
+    rows = []
+    for train_dataset, train_frame in sorted(frames_by_dataset.items()):
+        train_task = train_frame.dropna(subset=[target_col]).copy()
+        if train_task.empty:
+            continue
+
+        for test_dataset, test_frame in sorted(frames_by_dataset.items()):
+            test_task = test_frame.dropna(subset=[target_col]).copy()
+            if test_task.empty:
+                continue
+
+            if train_dataset == test_dataset:
+                y = train_task[target_col].astype(int)
+                stratify = y if y.nunique() == 2 and y.value_counts().min() >= 2 else None
+                train_rows, test_rows = train_test_split(
+                    train_task.index,
+                    test_size=test_size,
+                    random_state=random_state,
+                    stratify=stratify,
+                )
+                fit_frame = train_task.loc[train_rows]
+                eval_frame = train_task.loc[test_rows]
+                evaluation_mode = "within_dataset_holdout"
+            else:
+                fit_frame = train_task
+                eval_frame = test_task
+                evaluation_mode = "cross_dataset_transfer"
+
+            feature_columns = select_feature_columns(
+                fit_frame,
+                feature_set=feature_set,
+                target_col=target_col,
+            )
+            if not feature_columns:
+                raise ValueError(
+                    f"No usable features for {feature_set!r} when training on {train_dataset!r}."
+                )
+
+            missing_columns = [
+                column for column in feature_columns if column not in eval_frame.columns
+            ]
+            if missing_columns:
+                raise ValueError(
+                    f"{test_dataset!r} is missing transfer-test feature columns: {missing_columns}"
+                )
+
+            model = model_factory(fit_frame)
+            x_train = fit_frame[feature_columns]
+            y_train = fit_frame[target_col].astype(int)
+            x_test = eval_frame[feature_columns]
+            y_test = eval_frame[target_col].astype(int)
+
+            model.fit(x_train, y_train)
+            y_score = _predict_correctness_probability(model, x_test)
+            y_pred = (y_score >= 0.5).astype(int)
+            y_failure = 1 - y_test
+            failure_score = 1 - y_score
+
+            if y_test.nunique() == 2:
+                auroc = roc_auc_score(y_test, y_score)
+                correct_auprc = average_precision_score(y_test, y_score)
+                failure_auprc = average_precision_score(y_failure, failure_score)
+            else:
+                auroc = np.nan
+                correct_auprc = np.nan
+                failure_auprc = np.nan
+
+            rows.append(
+                {
+                    "train_dataset": train_dataset,
+                    "test_dataset": test_dataset,
+                    "evaluation_mode": evaluation_mode,
+                    "feature_set": feature_set,
+                    "feature_set_label": FEATURE_SET_LABELS.get(feature_set, feature_set),
+                    "n_features": len(feature_columns),
+                    "n_train": len(y_train),
+                    "n_test": len(y_test),
+                    "correct_rate_test": float(y_test.mean()),
+                    "failure_rate_test": float(y_failure.mean()),
+                    "auroc": auroc,
+                    "correct_auprc": correct_auprc,
+                    "failure_auprc": failure_auprc,
+                    "f1": f1_score(y_test, y_pred, zero_division=0),
+                    "precision": precision_score(y_test, y_pred, zero_division=0),
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def transfer_metric_matrix(
+    transfer_table: pd.DataFrame,
+    metric: str = "auroc",
+) -> pd.DataFrame:
+    """Return a train-dataset by test-dataset matrix from a transfer table."""
+
+    if metric not in transfer_table.columns:
+        raise ValueError(f"{metric!r} is not a column in the transfer table.")
+
+    matrix = transfer_table.pivot(
+        index="train_dataset",
+        columns="test_dataset",
+        values=metric,
+    )
+    return matrix.sort_index(axis=0).sort_index(axis=1)
+
+
+def plot_transfer_heatmap(
+    transfer_table: pd.DataFrame,
+    metric: str = "auroc",
+    ax=None,
+    title: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = 1.0,
+    cmap: str = "viridis",
+    fmt: str = ".3f",
+    annotation_fontsize: int = 13,
+    title_fontsize: int = 15,
+    label_fontsize: int = 13,
+    tick_fontsize: int = 12,
+):
+    """Plot a dataset transfer heatmap for one transfer metric."""
+
+    import matplotlib.pyplot as plt
+
+    matrix = transfer_metric_matrix(transfer_table, metric=metric)
+    values = matrix.to_numpy(dtype=float)
+    masked_values = np.ma.masked_invalid(values)
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(6, 5))
+
+    if vmin is None:
+        vmin = 0.5 if metric == "auroc" else 0.0
+
+    image = ax.imshow(masked_values, cmap=cmap, vmin=vmin, vmax=vmax)
+    ax.grid(False)
+    ax.set_xticks(np.arange(matrix.shape[1]))
+    ax.set_yticks(np.arange(matrix.shape[0]))
+    ax.set_xticklabels(matrix.columns)
+    ax.set_yticklabels(matrix.index)
+    ax.tick_params(which="both", length=0)
+    ax.tick_params(which="major", labelsize=tick_fontsize)
+    ax.set_xlabel("Test dataset", fontsize=label_fontsize)
+    ax.set_ylabel("Train dataset", fontsize=label_fontsize)
+    ax.set_title(title or f"Dataset transfer: {metric}", fontsize=title_fontsize)
+
+    for row_idx in range(matrix.shape[0]):
+        for col_idx in range(matrix.shape[1]):
+            value = values[row_idx, col_idx]
+            if not np.isfinite(value):
+                label = "n/a"
+            else:
+                label = format(value, fmt)
+            ax.text(
+                col_idx,
+                row_idx,
+                label,
+                ha="center",
+                va="center",
+                color="black",
+                fontsize=annotation_fontsize,
+                fontweight="bold",
+            )
+
+    ax.figure.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
+    return ax
+
+
 def plot_feature_boxplots_by_outcome(
     frame: pd.DataFrame,
     feature_columns: list[str],

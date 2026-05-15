@@ -50,6 +50,7 @@ LABEL_COLUMNS = {
 RAW_KMER_PREFIXES = ("kmer4_",)
 INTERNAL_FEATURE_COLUMNS = {
     "coverage",
+    "length_from_name",
 }
 BASELINE_PREFIXES: tuple[str, ...] = ()
 BASELINE_COLUMNS = {

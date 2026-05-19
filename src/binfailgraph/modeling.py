@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import combinations
 
 import numpy as np
 import pandas as pd
@@ -704,41 +705,82 @@ def transfer_feature_set_table(
     target_col: str = "target",
     test_size: float = 0.3,
     random_state: int = 42,
+    max_train_combination_size: int | None = 1,
+    train_label_separator: str = " + ",
 ) -> pd.DataFrame:
     """Evaluate dataset-to-dataset transfer for one feature set.
 
-    Diagonal cells use a held-out split within the dataset. Off-diagonal cells
-    fit on all labelled rows from the source dataset and evaluate on all
-    labelled rows from the target dataset.
+    Single-dataset diagonal cells use a held-out split within the dataset.
+    Off-diagonal cells fit on all labelled rows from the source dataset and
+    evaluate on all labelled rows from the target dataset. When a multi-dataset
+    training combination includes the test dataset, only the training split
+    from that dataset is included and the held-out split is evaluated.
     """
 
+    dataset_tasks = {
+        dataset_name: frame.dropna(subset=[target_col]).copy()
+        for dataset_name, frame in sorted(frames_by_dataset.items())
+    }
+    dataset_tasks = {
+        dataset_name: frame for dataset_name, frame in dataset_tasks.items() if not frame.empty
+    }
+    dataset_names = list(dataset_tasks)
+    if not dataset_names:
+        return pd.DataFrame()
+
+    if max_train_combination_size is None:
+        max_size = len(dataset_names)
+    else:
+        max_size = max(1, min(max_train_combination_size, len(dataset_names)))
+
+    train_combinations = [
+        combo
+        for combo_size in range(1, max_size + 1)
+        for combo in combinations(dataset_names, combo_size)
+    ]
+
+    heldout_splits = {}
+    for dataset_name, task in dataset_tasks.items():
+        y = task[target_col].astype(int)
+        stratify = y if y.nunique() == 2 and y.value_counts().min() >= 2 else None
+        train_rows, test_rows = train_test_split(
+            task.index,
+            test_size=test_size,
+            random_state=random_state,
+            stratify=stratify,
+        )
+        heldout_splits[dataset_name] = (train_rows, test_rows)
+
     rows = []
-    for train_dataset, train_frame in sorted(frames_by_dataset.items()):
-        train_task = train_frame.dropna(subset=[target_col]).copy()
-        if train_task.empty:
-            continue
+    for train_datasets in train_combinations:
+        train_dataset_label = train_label_separator.join(train_datasets)
+        for test_dataset, test_task in dataset_tasks.items():
+            fit_parts = []
 
-        for test_dataset, test_frame in sorted(frames_by_dataset.items()):
-            test_task = test_frame.dropna(subset=[target_col]).copy()
-            if test_task.empty:
-                continue
-
-            if train_dataset == test_dataset:
-                y = train_task[target_col].astype(int)
-                stratify = y if y.nunique() == 2 and y.value_counts().min() >= 2 else None
-                train_rows, test_rows = train_test_split(
-                    train_task.index,
-                    test_size=test_size,
-                    random_state=random_state,
-                    stratify=stratify,
+            if test_dataset in train_datasets:
+                train_rows, test_rows = heldout_splits[test_dataset]
+                for train_dataset in train_datasets:
+                    train_task = dataset_tasks[train_dataset]
+                    if train_dataset == test_dataset:
+                        fit_parts.append(train_task.loc[train_rows])
+                    else:
+                        fit_parts.append(train_task)
+                eval_frame = test_task.loc[test_rows]
+                evaluation_mode = (
+                    "within_dataset_holdout"
+                    if len(train_datasets) == 1
+                    else "combination_with_target_holdout"
                 )
-                fit_frame = train_task.loc[train_rows]
-                eval_frame = train_task.loc[test_rows]
-                evaluation_mode = "within_dataset_holdout"
             else:
-                fit_frame = train_task
+                fit_parts = [dataset_tasks[train_dataset] for train_dataset in train_datasets]
                 eval_frame = test_task
-                evaluation_mode = "cross_dataset_transfer"
+                evaluation_mode = (
+                    "cross_dataset_transfer"
+                    if len(train_datasets) == 1
+                    else "combination_cross_dataset_transfer"
+                )
+
+            fit_frame = pd.concat(fit_parts, ignore_index=True)
 
             feature_columns = select_feature_columns(
                 fit_frame,
@@ -781,7 +823,9 @@ def transfer_feature_set_table(
 
             rows.append(
                 {
-                    "train_dataset": train_dataset,
+                    "train_dataset": train_dataset_label,
+                    "train_dataset_count": len(train_datasets),
+                    "train_dataset_members": train_label_separator.join(train_datasets),
                     "test_dataset": test_dataset,
                     "evaluation_mode": evaluation_mode,
                     "feature_set": feature_set,
@@ -816,7 +860,9 @@ def transfer_metric_matrix(
         columns="test_dataset",
         values=metric,
     )
-    return matrix.sort_index(axis=0).sort_index(axis=1)
+    train_order = transfer_table["train_dataset"].drop_duplicates().tolist()
+    test_order = transfer_table["test_dataset"].drop_duplicates().tolist()
+    return matrix.reindex(index=train_order, columns=test_order)
 
 
 def plot_transfer_heatmap(
@@ -845,7 +891,7 @@ def plot_transfer_heatmap(
         _, ax = plt.subplots(figsize=(6, 5))
 
     if vmin is None:
-        vmin = 0.5 if metric == "auroc" else 0.0
+        vmin = 0.5
 
     image = ax.imshow(masked_values, cmap=cmap, vmin=vmin, vmax=vmax)
     ax.grid(False)

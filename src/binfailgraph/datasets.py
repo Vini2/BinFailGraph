@@ -6,12 +6,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+DATASET_FILE_CANDIDATES = {
+    "graph_file": ("assembly_graph_with_scaffolds.gfa",),
+    "contigs_file": ("contigs.fasta",),
+    "contig_paths_file": ("contigs.paths",),
+    "ground_truth_file": ("ground_truth.csv", "ground_truth_mapping.csv"),
+    "bin_assignments_file": ("initial_contig_bins.csv",),
+}
+
 REQUIRED_DATASET_FILES = {
-    "graph_file": "assembly_graph_with_scaffolds.gfa",
-    "contigs_file": "contigs.fasta",
-    "contig_paths_file": "contigs.paths",
-    "ground_truth_file": "ground_truth.csv",
-    "bin_assignments_file": "initial_contig_bins.csv",
+    field: filenames[0] for field, filenames in DATASET_FILE_CANDIDATES.items()
 }
 
 
@@ -27,9 +31,16 @@ class DatasetPaths:
 
 
 def _dataset_from_dir(path: Path) -> DatasetPaths | None:
-    paths = {field: path / filename for field, filename in REQUIRED_DATASET_FILES.items()}
-    if not all(file_path.exists() for file_path in paths.values()):
-        return None
+    paths = {}
+    for field, filenames in DATASET_FILE_CANDIDATES.items():
+        for filename in filenames:
+            candidate = path / filename
+            if candidate.exists():
+                paths[field] = candidate
+                break
+        else:
+            return None
+
     return DatasetPaths(name=path.name, root=path, **paths)
 
 
@@ -54,8 +65,9 @@ def discover_datasets(data_root: str | Path) -> list[DatasetPaths]:
                 datasets.append(dataset)
 
     if not datasets:
-        required = ", ".join(REQUIRED_DATASET_FILES.values())
+        required = ", ".join(
+            "/".join(filenames) for filenames in DATASET_FILE_CANDIDATES.values()
+        )
         raise FileNotFoundError(f"No datasets found under {root}. Required files: {required}")
 
     return datasets
-

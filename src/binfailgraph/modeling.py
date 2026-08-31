@@ -15,6 +15,7 @@ from sklearn.metrics import (
     auc,
     f1_score,
     precision_score,
+    recall_score,
     roc_curve,
     roc_auc_score,
 )
@@ -64,6 +65,7 @@ BASELINE_COLUMNS = {
 COMPARISON_FEATURE_SETS = [
     "length_only",
     "coverage_only",
+    "composition_only",
     "composition_coverage",
     "graph_only",
     "composition_coverage_graph",
@@ -71,10 +73,190 @@ COMPARISON_FEATURE_SETS = [
 
 FEATURE_SET_LABELS = {
     "length_only": "Length only",
+    "composition_only": "Composition difference only",
     "coverage_only": "Coverage difference only",
-    "composition_coverage": "Composition + coverage difference",
+    "composition_coverage": "Composition + coverage",
     "graph_only": "Graph only",
-    "composition_coverage_graph": "Composition + coverage difference + graph",
+    "composition_coverage_graph": "Composition + coverage + graph",
+    "bin_nucleotide_only": "Bin nucleotide only",
+    "bin_coverage_only": "Bin coverage only",
+    "bin_graph_only": "Bin graph only",
+    "bin_nucleotide_coverage": "Bin nucleotide + coverage",
+    "bin_nucleotide_coverage_graph": "Bin nucleotide + coverage + graph",
+}
+
+BIN_COMPARISON_FEATURE_SETS = [
+    "bin_nucleotide_only",
+    "bin_coverage_only",
+    "bin_graph_only",
+    "bin_nucleotide_coverage",
+    "bin_nucleotide_coverage_graph",
+]
+
+BIN_IDENTIFIER_COLUMNS = {
+    "dataset",
+    "bin",
+    "bin_majority_genome",
+}
+
+BIN_LABEL_COLUMNS = {
+    "bin_purity",
+    "bin_truth_weight",
+    "bin_majority_genome_weight",
+    "bin_truth_genome_count",
+    "bin_labelled_contig_count",
+    "bin_known_truth_contig_count",
+    "bin_mis_binned_contig_count",
+    "bin_has_mixed_truth",
+    "bin_is_contaminated",
+    "bin_has_mis_binned_contig",
+    "label_failure",
+    "label_success",
+    "target",
+}
+
+BIN_NUCLEOTIDE_COLUMNS = {
+    "bin_contig_count",
+    "bin_total_length",
+    "bin_n50",
+    "bin_mean_contig_length",
+    "bin_median_contig_length",
+    "bin_max_contig_length",
+    "bin_gc_mean",
+    "bin_gc_median",
+    "bin_gc_std",
+    "bin_gc_min",
+    "bin_gc_max",
+    "bin_gc_range",
+    "bin_gc_weighted_mean",
+    "bin_4mer_composition_distance_mean",
+    "bin_4mer_composition_distance_median",
+    "bin_4mer_composition_distance_std",
+    "bin_4mer_composition_distance_min",
+    "bin_4mer_composition_distance_max",
+    "bin_4mer_composition_distance_range",
+}
+
+BIN_COVERAGE_COLUMNS = {
+    "bin_coverage_mean",
+    "bin_coverage_median",
+    "bin_coverage_std",
+    "bin_coverage_min",
+    "bin_coverage_max",
+    "bin_coverage_range",
+    "bin_coverage_cv",
+    "bin_coverage_weighted_mean",
+    "bin_coverage_difference_mean",
+    "bin_coverage_difference_median",
+    "bin_coverage_difference_std",
+    "bin_coverage_difference_min",
+    "bin_coverage_difference_max",
+    "bin_coverage_difference_range",
+    "bin_coverage_difference_cv",
+}
+
+BIN_GRAPH_COLUMNS = {
+    "bin_degree_mean",
+    "bin_degree_std",
+    "bin_degree_min",
+    "bin_degree_max",
+    "bin_degree_range",
+    "bin_neighbor_count_mean",
+    "bin_neighbor_count_std",
+    "bin_neighbor_count_min",
+    "bin_neighbor_count_max",
+    "bin_neighbor_count_range",
+    "bin_second_hop_neighbor_count_mean",
+    "bin_second_hop_neighbor_count_std",
+    "bin_second_hop_neighbor_count_min",
+    "bin_second_hop_neighbor_count_max",
+    "bin_second_hop_neighbor_count_range",
+    "bin_local_clustering_coefficient_mean",
+    "bin_local_clustering_coefficient_std",
+    "bin_local_clustering_coefficient_min",
+    "bin_local_clustering_coefficient_max",
+    "bin_local_clustering_coefficient_range",
+    "bin_betweenness_centrality_mean",
+    "bin_betweenness_centrality_std",
+    "bin_betweenness_centrality_min",
+    "bin_betweenness_centrality_max",
+    "bin_betweenness_centrality_range",
+    "bin_closeness_centrality_mean",
+    "bin_closeness_centrality_std",
+    "bin_closeness_centrality_min",
+    "bin_closeness_centrality_max",
+    "bin_closeness_centrality_range",
+    "bin_pagerank_mean",
+    "bin_pagerank_std",
+    "bin_pagerank_min",
+    "bin_pagerank_max",
+    "bin_pagerank_range",
+    "bin_shortest_path_to_branch_node_mean",
+    "bin_shortest_path_to_branch_node_std",
+    "bin_shortest_path_to_branch_node_min",
+    "bin_shortest_path_to_branch_node_max",
+    "bin_shortest_path_to_branch_node_range",
+    "bin_repeat_likeness_coverage_ratio_mean",
+    "bin_repeat_likeness_coverage_ratio_std",
+    "bin_repeat_likeness_coverage_ratio_min",
+    "bin_repeat_likeness_coverage_ratio_max",
+    "bin_repeat_likeness_coverage_ratio_range",
+    "bin_coverage_neighbor_abs_diff_mean",
+    "bin_coverage_neighbor_abs_diff_std",
+    "bin_coverage_neighbor_abs_diff_min",
+    "bin_coverage_neighbor_abs_diff_max",
+    "bin_coverage_neighbor_abs_diff_range",
+    "bin_coverage_neighbor_log2_ratio_mean",
+    "bin_coverage_neighbor_log2_ratio_std",
+    "bin_coverage_neighbor_log2_ratio_min",
+    "bin_coverage_neighbor_log2_ratio_max",
+    "bin_coverage_neighbor_log2_ratio_range",
+    "bin_coverage_neighbor_cv_mean",
+    "bin_coverage_neighbor_cv_std",
+    "bin_coverage_neighbor_cv_min",
+    "bin_coverage_neighbor_cv_max",
+    "bin_coverage_neighbor_cv_range",
+    "bin_gc_neighbor_abs_diff_mean",
+    "bin_gc_neighbor_abs_diff_std",
+    "bin_gc_neighbor_abs_diff_min",
+    "bin_gc_neighbor_abs_diff_max",
+    "bin_gc_neighbor_abs_diff_range",
+    "bin_kmer_neighbor_cosine_distance_mean",
+    "bin_kmer_neighbor_cosine_distance_std",
+    "bin_kmer_neighbor_cosine_distance_min",
+    "bin_kmer_neighbor_cosine_distance_max",
+    "bin_kmer_neighbor_cosine_distance_range",
+    "bin_neighbor_bin_entropy_mean",
+    "bin_neighbor_bin_entropy_std",
+    "bin_neighbor_bin_entropy_min",
+    "bin_neighbor_bin_entropy_max",
+    "bin_neighbor_bin_entropy_range",
+    "bin_neighbor_same_bin_fraction_mean",
+    "bin_neighbor_same_bin_fraction_std",
+    "bin_neighbor_same_bin_fraction_min",
+    "bin_neighbor_same_bin_fraction_max",
+    "bin_neighbor_same_bin_fraction_range",
+    "bin_neighbor_different_bin_fraction_mean",
+    "bin_neighbor_different_bin_fraction_std",
+    "bin_neighbor_different_bin_fraction_min",
+    "bin_neighbor_different_bin_fraction_max",
+    "bin_neighbor_different_bin_fraction_range",
+    "bin_neighbor_unassigned_bin_fraction_mean",
+    "bin_neighbor_unassigned_bin_fraction_std",
+    "bin_neighbor_unassigned_bin_fraction_min",
+    "bin_neighbor_unassigned_bin_fraction_max",
+    "bin_neighbor_unassigned_bin_fraction_range",
+    "bin_is_tip_fraction",
+    "bin_is_tip_count",
+    "bin_is_articulation_point_fraction",
+    "bin_is_articulation_point_count",
+    "bin_is_incident_to_bridge_fraction",
+    "bin_is_incident_to_bridge_count",
+    "bin_lies_in_cycle_fraction",
+    "bin_lies_in_cycle_count",
+    "bin_graph_component_count",
+    "bin_largest_graph_component_fraction",
+    "bin_graph_density",
 }
 
 COMPOSITION_COLUMNS = {
@@ -84,38 +266,16 @@ COMPOSITION_COLUMNS = {
 
 GRAPH_STRUCTURE_COLUMNS = {
     "degree",
-    "neighbor_count",
-    "second_hop_neighbor_count",
-    "local_clustering_coefficient",
-    "betweenness_centrality",
-    "closeness_centrality",
     "pagerank",
-    "is_tip",
-    "is_articulation_point",
-    "is_incident_to_bridge",
-    "lies_in_cycle",
-    "shortest_path_to_branch_node",
 }
 
 GRAPH_AMBIGUITY_COLUMNS = {
-    "repeat_likeness_coverage_ratio",
-    "coverage_neighbor_median",
     "coverage_neighbor_abs_diff",
-    "coverage_neighbor_log2_ratio",
-    "coverage_neighbor_cv",
-    "gc_neighbor_median",
-    "gc_neighbor_abs_diff",
-    "kmer_neighbor_cosine_distance",
 }
 
 GRAPH_BIN_CONTEXT_COLUMNS = {
-    "neighbor_same_bin_fraction",
     "neighbor_different_bin_fraction",
-    "neighbor_unassigned_bin_fraction",
-    "neighbor_bin_entropy",
-    "bin_graph_component_count",
     "bin_largest_graph_component_fraction",
-    "bin_graph_density",
 }
 
 GRAPH_COLUMNS = GRAPH_STRUCTURE_COLUMNS | GRAPH_AMBIGUITY_COLUMNS
@@ -144,7 +304,6 @@ ORACLE_COLUMNS = {
     "neighbor_different_truth_genome_fraction",
     "neighbor_unassigned_truth_genome_fraction",
 }
-
 
 @dataclass(frozen=True)
 class EvaluationResult:
@@ -204,6 +363,8 @@ def select_feature_columns(
         allowed = [column for column in candidate_columns if column == "length"]
     elif feature_set == "coverage_only":
         allowed = [column for column in candidate_columns if column == "coverage_difference"]
+    elif feature_set == "composition_only":
+        allowed = [column for column in candidate_columns if is_composition(column)]
     elif feature_set == "composition_coverage":
         allowed = [
             column
@@ -211,11 +372,11 @@ def select_feature_columns(
             if column == "coverage_difference" or is_composition(column)
         ]
     elif feature_set == "graph_only":
-        graph_only_columns = GRAPH_STRUCTURE_COLUMNS | GRAPH_BIN_CONTEXT_COLUMNS
+        graph_only_columns = GRAPH_STRUCTURE_COLUMNS | GRAPH_AMBIGUITY_COLUMNS | GRAPH_BIN_CONTEXT_COLUMNS
         allowed = [column for column in candidate_columns if column in graph_only_columns]
     elif feature_set == "composition_coverage_graph":
         full_columns = (
-            {"coverage_difference"}
+            {"length", "coverage_difference"}
             | COMPOSITION_COLUMNS
             | GRAPH_STRUCTURE_COLUMNS
             | GRAPH_AMBIGUITY_COLUMNS
@@ -285,6 +446,64 @@ def comparison_feature_columns(
 non_kmer_comparison_feature_columns = comparison_feature_columns
 
 
+def select_bin_feature_columns(
+    frame: pd.DataFrame,
+    feature_set: str = "bin_nucleotide_coverage_graph",
+    target_col: str = "target",
+) -> list[str]:
+    """Select numeric bin-level features for a modeling scenario."""
+
+    numeric_columns = set(frame.select_dtypes(include=[np.number, "bool"]).columns)
+    excluded = BIN_IDENTIFIER_COLUMNS | BIN_LABEL_COLUMNS | {target_col}
+    candidate_columns = sorted(numeric_columns - excluded)
+
+    if feature_set == "bin_nucleotide_only":
+        allowed = [column for column in candidate_columns if column in BIN_NUCLEOTIDE_COLUMNS]
+    elif feature_set == "bin_coverage_only":
+        allowed = [column for column in candidate_columns if column in BIN_COVERAGE_COLUMNS]
+    elif feature_set == "bin_graph_only":
+        allowed = [column for column in candidate_columns if column in BIN_GRAPH_COLUMNS]
+    elif feature_set == "bin_nucleotide_coverage":
+        allowed = [
+            column
+            for column in candidate_columns
+            if column in BIN_NUCLEOTIDE_COLUMNS or column in BIN_COVERAGE_COLUMNS
+        ]
+    elif feature_set == "bin_nucleotide_coverage_graph":
+        allowed = [
+            column
+            for column in candidate_columns
+            if column in BIN_NUCLEOTIDE_COLUMNS
+            or column in BIN_COVERAGE_COLUMNS
+            or column in BIN_GRAPH_COLUMNS
+        ]
+    else:
+        raise ValueError(
+            f"feature_set must be one of: {', '.join(BIN_COMPARISON_FEATURE_SETS)}"
+        )
+
+    return [column for column in allowed if frame[column].notna().any()]
+
+
+def bin_comparison_feature_columns(
+    frame: pd.DataFrame,
+    feature_sets: list[str] | None = None,
+    target_col: str = "target",
+) -> list[str]:
+    """Return the union of selected bin-level comparison features."""
+
+    feature_sets = feature_sets or BIN_COMPARISON_FEATURE_SETS
+    columns = []
+    seen = set()
+    for feature_set in feature_sets:
+        for column in select_bin_feature_columns(frame, feature_set=feature_set, target_col=target_col):
+            if column in seen:
+                continue
+            seen.add(column)
+            columns.append(column)
+    return columns
+
+
 def significance_stars(p_value: float) -> str:
     """Map a p-value to the usual significance-star label."""
 
@@ -299,6 +518,16 @@ def significance_stars(p_value: float) -> str:
     if p_value <= 5e-2:
         return "*"
     return "ns"
+
+
+def _format_significance_value(value: float, label: str) -> str:
+    """Format a p/q-value for plot annotations without reporting exact zero."""
+
+    if not np.isfinite(value):
+        return f"{label}=n/a"
+    if value == 0.0:
+        return f"{label}<1e-300"
+    return f"{label}={value:.2g}"
 
 
 def _benjamini_hochberg(p_values: pd.Series) -> pd.Series:
@@ -534,6 +763,7 @@ def evaluate_classifier(
         "correct_rate_test": float(y_test.mean()),
         "f1": f1_score(y_test, y_pred, zero_division=0),
         "precision": precision_score(y_test, y_pred, zero_division=0),
+        "recall": recall_score(y_test, y_pred, zero_division=0),
         "ece_10bin": expected_calibration_error(y_test, y_score, n_bins=10),
     }
     if y_test.nunique() == 2:
@@ -547,7 +777,12 @@ def evaluate_classifier(
     metrics[f"precision_at_top_{int(top_k_fraction * 100)}pct"] = precision_top
     metrics[f"recall_at_top_{int(top_k_fraction * 100)}pct"] = recall_top
 
-    predictions = model_frame.loc[idx_test, ["contig", "contig_short", target_col]].copy()
+    prediction_columns = [
+        column
+        for column in ["dataset", "bin", "contig", "contig_short", target_col]
+        if column in model_frame.columns
+    ]
+    predictions = model_frame.loc[idx_test, prediction_columns].copy()
     predictions["correctness_score"] = y_score
     predictions = predictions.sort_values("correctness_score", ascending=False)
 
@@ -593,6 +828,56 @@ def compare_feature_sets(
                 "n_features": len(feature_columns),
                 "auroc": result.metrics["auroc"],
                 "auprc": result.metrics["auprc"],
+                "f1": result.metrics["f1"],
+                "precision": result.metrics["precision"],
+                "recall": result.metrics["recall"],
+            }
+        )
+
+    return pd.DataFrame(rows), results
+
+
+def compare_bin_feature_sets(
+    frame: pd.DataFrame,
+    model_factory,
+    feature_sets: list[str] | None = None,
+    target_col: str = "target",
+    test_size: float = 0.3,
+    random_state: int = 42,
+    top_k_fraction: float = 0.1,
+) -> tuple[pd.DataFrame, dict[str, EvaluationResult]]:
+    """Evaluate the same model across named bin-level feature sets."""
+
+    feature_sets = feature_sets or BIN_COMPARISON_FEATURE_SETS
+    results: dict[str, EvaluationResult] = {}
+    rows = []
+
+    for feature_set in feature_sets:
+        feature_columns = select_bin_feature_columns(
+            frame,
+            feature_set=feature_set,
+            target_col=target_col,
+        )
+        result = evaluate_classifier(
+            frame=frame,
+            model=model_factory(),
+            feature_columns=feature_columns,
+            target_col=target_col,
+            test_size=test_size,
+            random_state=random_state,
+            top_k_fraction=top_k_fraction,
+        )
+        results[feature_set] = result
+        rows.append(
+            {
+                "feature_set": feature_set,
+                "feature_set_label": FEATURE_SET_LABELS.get(feature_set, feature_set),
+                "n_features": len(feature_columns),
+                "auroc": result.metrics["auroc"],
+                "auprc": result.metrics["auprc"],
+                "f1": result.metrics["f1"],
+                "precision": result.metrics["precision"],
+                "recall": result.metrics["recall"],
             }
         )
 
@@ -664,7 +949,7 @@ def combined_dataset_metric_table(
     feature_sets: list[str] | None = None,
     target_col: str = "target",
 ) -> pd.DataFrame:
-    """Compute AUROC and AUPRC after pooling held-out predictions across datasets."""
+    """Compute pooled held-out metrics across datasets."""
 
     feature_sets = feature_sets or COMPARISON_FEATURE_SETS
     rows = []
@@ -676,6 +961,7 @@ def combined_dataset_metric_table(
         )
         y_true = combined[target_col].astype(int)
         y_score = combined["correctness_score"]
+        y_pred = (y_score >= 0.5).astype(int)
 
         if y_true.nunique() == 2:
             auroc = roc_auc_score(y_true, y_score)
@@ -692,6 +978,9 @@ def combined_dataset_metric_table(
                 "correct_rate": float(y_true.mean()),
                 "auroc": auroc,
                 "auprc": auprc,
+                "f1": f1_score(y_true, y_pred, zero_division=0),
+                "precision": precision_score(y_true, y_pred, zero_division=0),
+                "recall": recall_score(y_true, y_pred, zero_division=0),
             }
         )
 
@@ -707,14 +996,14 @@ def transfer_feature_set_table(
     random_state: int = 42,
     max_train_combination_size: int | None = 1,
     train_label_separator: str = " + ",
+    allow_train_test_overlap: bool = False,
 ) -> pd.DataFrame:
     """Evaluate dataset-to-dataset transfer for one feature set.
 
-    Single-dataset diagonal cells use a held-out split within the dataset.
-    Off-diagonal cells fit on all labelled rows from the source dataset and
-    evaluate on all labelled rows from the target dataset. When a multi-dataset
-    training combination includes the test dataset, only the training split
-    from that dataset is included and the held-out split is evaluated.
+    By default this is strict dataset-level holdout: a test dataset is evaluated
+    only against training combinations that do not include that dataset. Set
+    ``allow_train_test_overlap=True`` to include legacy within-dataset holdout
+    cells where rows from the test dataset are split into train/test partitions.
     """
 
     dataset_tasks = {
@@ -758,6 +1047,8 @@ def transfer_feature_set_table(
             fit_parts = []
 
             if test_dataset in train_datasets:
+                if not allow_train_test_overlap:
+                    continue
                 train_rows, test_rows = heldout_splits[test_dataset]
                 for train_dataset in train_datasets:
                     train_task = dataset_tasks[train_dataset]
@@ -935,8 +1226,9 @@ def plot_feature_boxplots_by_outcome(
     ncols: int = 3,
     showfliers: bool = False,
     p_adjust: str | None = "fdr_bh",
+    entity_label: str = "contigs",
 ):
-    """Plot paged boxplots comparing correct and failed contigs for each feature."""
+    """Plot paged boxplots comparing correct and failed entities for each feature."""
 
     import matplotlib.pyplot as plt
 
@@ -976,7 +1268,7 @@ def plot_feature_boxplots_by_outcome(
         fig, axes = plt.subplots(
             nrows=nrows,
             ncols=ncols,
-            figsize=(4.2 * ncols, 3.2 * nrows),
+            figsize=(4.2 * ncols, 2.55 * nrows),
             squeeze=False,
         )
 
@@ -1010,10 +1302,7 @@ def plot_feature_boxplots_by_outcome(
             p_value_column = "p_value_adj" if p_adjust == "fdr_bh" else "p_value"
             p_value = row[p_value_column]
             p_label = "q" if p_adjust == "fdr_bh" else "p"
-            if np.isfinite(p_value):
-                p_text = f"{p_label}={p_value:.2g}"
-            else:
-                p_text = f"{p_label}=n/a"
+            p_text = _format_significance_value(p_value, p_label)
 
             y_min, y_max = ax.get_ylim()
             y_span = y_max - y_min
@@ -1038,26 +1327,29 @@ def plot_feature_boxplots_by_outcome(
                 fontweight="bold",
                 linespacing=0.9,
             )
-            ax.set_ylim(y_min, text_y + 0.12 * y_span)
+            ax.set_ylim(y_min, text_y + 0.14 * y_span)
             ax.set_title(feature, fontsize=10)
             ax.set_xticks([1, 2])
             ax.set_xticklabels(
                 [f"Correct\nn={len(correct)}", f"Failed\nn={len(failed)}"],
                 fontsize=9,
             )
-            ax.set_ylabel("value")
+            ax.set_ylabel("Value")
             ax.grid(axis="y", alpha=0.25)
 
         for ax in axes.ravel()[len(chunk) :]:
             ax.set_axis_off()
 
-        page_number = page_start // features_per_figure + 1
-        page_count = int(np.ceil(len(available) / features_per_figure))
-        fig.suptitle(
-            f"Correct vs failed contigs: comparison features ({page_number}/{page_count})",
-            fontsize=13,
-        )
-        fig.tight_layout(rect=[0, 0, 1, 0.96])
+        if len(chunk) > 1:
+            page_number = page_start // features_per_figure + 1
+            page_count = int(np.ceil(len(available) / features_per_figure))
+            fig.suptitle(
+                f"Correct vs failed {entity_label}: comparison features ({page_number}/{page_count})",
+                fontsize=13,
+            )
+            fig.tight_layout(rect=[0, 0, 1, 0.96])
+        else:
+            fig.tight_layout()
         figures.append(fig)
 
     return figures

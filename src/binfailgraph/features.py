@@ -131,6 +131,52 @@ def _n50(lengths: pd.Series) -> float:
     return clean[-1]
 
 
+def _weighted_mean(values: pd.Series, weights: pd.Series) -> float:
+    values = pd.to_numeric(values, errors="coerce")
+    weights = pd.to_numeric(weights, errors="coerce").fillna(0).clip(lower=0)
+    mask = values.notna() & (weights > 0)
+    if not mask.any():
+        return np.nan
+    return float(np.average(values.loc[mask], weights=weights.loc[mask]))
+
+
+def _numeric_stats(
+    values: pd.Series,
+    prefix: str,
+    include_median: bool = True,
+    include_cv: bool = False,
+) -> dict[str, float]:
+    values = pd.to_numeric(values, errors="coerce").replace([np.inf, -np.inf], np.nan)
+    clean = values.dropna()
+    if clean.empty:
+        stats = {
+            f"{prefix}_mean": np.nan,
+            f"{prefix}_std": np.nan,
+            f"{prefix}_min": np.nan,
+            f"{prefix}_max": np.nan,
+            f"{prefix}_range": np.nan,
+        }
+        if include_median:
+            stats[f"{prefix}_median"] = np.nan
+        if include_cv:
+            stats[f"{prefix}_cv"] = np.nan
+        return stats
+
+    mean = float(clean.mean())
+    stats = {
+        f"{prefix}_mean": mean,
+        f"{prefix}_std": float(clean.std(ddof=0)),
+        f"{prefix}_min": float(clean.min()),
+        f"{prefix}_max": float(clean.max()),
+        f"{prefix}_range": float(clean.max() - clean.min()),
+    }
+    if include_median:
+        stats[f"{prefix}_median"] = float(clean.median())
+    if include_cv:
+        stats[f"{prefix}_cv"] = float(clean.std(ddof=0) / mean) if mean else np.nan
+    return stats
+
+
 def _to_networkx(graph) -> nx.Graph:
     nx_graph = nx.Graph()
     nx_graph.add_nodes_from(range(graph.vcount()))
@@ -437,3 +483,139 @@ def build_feature_table(
         frame = frame.drop(columns=_kmer_columns(frame, k=k), errors="ignore")
 
     return frame
+
+
+def build_bin_feature_table(
+    contig_feature_table: pd.DataFrame,
+    dataset_name: str | None = None,
+) -> pd.DataFrame:
+    """Aggregate contig-level features into one row per predicted bin.
+
+    The resulting table contains nucleotide/composition summaries, coverage
+    consistency summaries, and graph-coherence summaries for each bin. It is
+    intentionally label-free; join it with :func:`binfailgraph.labels.bin_task_frame`
+    to create a supervised bin-level modeling table.
+    """
+
+    required = {"bin", "contig", "length", "coverage", "gc_content"}
+    missing = required.difference(contig_feature_table.columns)
+    if missing:
+        raise ValueError(f"Contig feature table is missing required columns: {sorted(missing)}")
+
+    binned = contig_feature_table.loc[contig_feature_table["bin"].notna()].copy()
+    if binned.empty:
+        columns = ["bin"]
+        if dataset_name is not None or "dataset" in contig_feature_table:
+            columns.insert(0, "dataset")
+        return pd.DataFrame(columns=columns)
+
+    graph_numeric_columns = [
+        "degree",
+        "neighbor_count",
+        "second_hop_neighbor_count",
+        "local_clustering_coefficient",
+        "betweenness_centrality",
+        "closeness_centrality",
+        "pagerank",
+        "shortest_path_to_branch_node",
+        "repeat_likeness_coverage_ratio",
+        "coverage_neighbor_abs_diff",
+        "coverage_neighbor_log2_ratio",
+        "coverage_neighbor_cv",
+        "gc_neighbor_abs_diff",
+        "kmer_neighbor_cosine_distance",
+        "neighbor_bin_entropy",
+        "neighbor_same_bin_fraction",
+        "neighbor_different_bin_fraction",
+        "neighbor_unassigned_bin_fraction",
+    ]
+    graph_binary_columns = [
+        "is_tip",
+        "is_articulation_point",
+        "is_incident_to_bridge",
+        "lies_in_cycle",
+    ]
+    bin_graph_columns = [
+        "bin_graph_component_count",
+        "bin_largest_graph_component_fraction",
+        "bin_graph_density",
+    ]
+
+    records = []
+    group_keys = ["bin"]
+    if dataset_name is None and "dataset" in binned.columns:
+        group_keys = ["dataset", "bin"]
+
+    for group_key, subset in binned.groupby(group_keys, dropna=True, sort=True):
+        if len(group_keys) == 2:
+            current_dataset, bin_id = group_key
+        else:
+            bin_id = group_key[0] if isinstance(group_key, tuple) else group_key
+            current_dataset = dataset_name
+
+        lengths = pd.to_numeric(subset["length"], errors="coerce").fillna(0).clip(lower=0)
+        weights = lengths.where(lengths > 0, 1)
+        record = {
+            "bin": bin_id,
+            "bin_contig_count": int(len(subset)),
+            "bin_total_length": float(lengths.sum()),
+            "bin_n50": _n50(lengths),
+            "bin_mean_contig_length": float(lengths.mean()) if len(lengths) else np.nan,
+            "bin_median_contig_length": float(lengths.median()) if len(lengths) else np.nan,
+            "bin_max_contig_length": float(lengths.max()) if len(lengths) else np.nan,
+        }
+        if current_dataset is not None:
+            record["dataset"] = current_dataset
+
+        record.update(_numeric_stats(subset["gc_content"], "bin_gc", include_cv=False))
+        record["bin_gc_weighted_mean"] = _weighted_mean(subset["gc_content"], weights)
+
+        if "4mer_composition_distance" in subset:
+            record.update(
+                _numeric_stats(
+                    subset["4mer_composition_distance"],
+                    "bin_4mer_composition_distance",
+                    include_cv=False,
+                )
+            )
+
+        record.update(_numeric_stats(subset["coverage"], "bin_coverage", include_cv=True))
+        record["bin_coverage_weighted_mean"] = _weighted_mean(subset["coverage"], weights)
+
+        if "coverage_difference" in subset:
+            record.update(
+                _numeric_stats(
+                    subset["coverage_difference"],
+                    "bin_coverage_difference",
+                    include_cv=True,
+                )
+            )
+
+        for column in graph_numeric_columns:
+            if column in subset:
+                record.update(
+                    _numeric_stats(
+                        subset[column],
+                        f"bin_{column}",
+                        include_median=False,
+                        include_cv=False,
+                    )
+                )
+
+        for column in graph_binary_columns:
+            if column in subset:
+                values = pd.to_numeric(subset[column], errors="coerce")
+                record[f"bin_{column}_fraction"] = float(values.mean()) if values.notna().any() else np.nan
+                record[f"bin_{column}_count"] = float(values.sum(skipna=True))
+
+        for column in bin_graph_columns:
+            if column in subset:
+                values = pd.to_numeric(subset[column], errors="coerce").dropna()
+                record[column] = float(values.iloc[0]) if not values.empty else np.nan
+
+        records.append(record)
+
+    out = pd.DataFrame.from_records(records)
+    id_columns = [column for column in ["dataset", "bin"] if column in out.columns]
+    other_columns = sorted(column for column in out.columns if column not in id_columns)
+    return out[id_columns + other_columns]

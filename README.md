@@ -1,6 +1,6 @@
-# Graph-Based Failure Prediction for Metagenomic Binning
+# When Bins Break: Assembly Graph Topology Reveals Failure Patterns in Metagenomic Binning
 
-BinFailGraph is a diagnostic scaffold for asking:
+This work asks:
 
 > Can assembly-graph structure predict which contigs or bins are likely to fail during metagenomic binning?
 

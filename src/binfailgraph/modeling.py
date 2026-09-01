@@ -1331,7 +1331,7 @@ def plot_feature_boxplots_by_outcome(
             ax.set_title(feature, fontsize=10)
             ax.set_xticks([1, 2])
             ax.set_xticklabels(
-                [f"Correct\nn={len(correct)}", f"Failed\nn={len(failed)}"],
+                [f"Correct\nn={len(correct)}", f"Incorrect\nn={len(failed)}"],
                 fontsize=9,
             )
             ax.set_ylabel("Value")

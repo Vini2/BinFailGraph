@@ -100,3 +100,7 @@ for dataset in discover_datasets(Path("tests/data")):
 ```
 
 `misbin_task["target"]` is the contig-level correctness target for the initial binning: `0` means incorrect, `1` means correct.
+
+## Data Availability
+
+All the datasets used to train and test the models can be found on Zenodo at [https://zenodo.org/records/22262802](https://zenodo.org/records/22262802).

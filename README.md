@@ -2,9 +2,9 @@
 
 This work asks:
 
-> Can assembly-graph structure predict which contigs or bins are likely to fail during metagenomic binning?
+> Can assembly-graph structure predict which contigs are likely to be binned correctly and incorrectly during metagenomic binning?
 
-The code is organized around contig-level failure prediction. It uses `agtools` to load a SPAdes contig-level graph, extracts non-graph baselines plus graph topology/ambiguity features, builds labels from ground truth and bin assignments, and evaluates simple ML models. The default notebooks use an initial binning result, `initial_contig_bins.csv`, and predict whether each binned contig was assigned correctly.
+The code is organized around contig-level failure prediction. It uses [`agtools`](https://github.com/Vini2/agtools) to load a SPAdes contig-level graph, extracts length, nucleotide composition, coverage, assembly graph topology based features, obtains labels from ground truth and existing bin assignments, and evaluates two classical machine learning models. The methods use an initial binning result, `initial_contig_bins.csv`, and predict whether each binned contig was assigned correctly.
 
 ## Setup
 

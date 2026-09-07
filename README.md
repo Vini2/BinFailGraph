@@ -29,11 +29,10 @@ The bundled initial binning file is the post-binning diagnostic input. For new e
 
 To add another dataset later, create a new subdirectory under `tests/data/` with the same required filenames. The notebooks discover dataset folders automatically.
 
-## Notebooks
+## Model Notebooks
 
-- `notebooks/01_logistic_regression.ipynb`
-- `notebooks/02_random_forest.ipynb`
-- `notebooks/03_xgboost.ipynb`
+- `notebooks/01_random_forest.ipynb`
+- `notebooks/02_xgboost.ipynb`
 
 Each notebook runs the same feature/label pipeline on every discovered dataset and swaps only the model. The default task is `misbin`: among contigs present in `initial_contig_bins.csv`, predict `target=0` for an incorrect initial bin assignment and `target=1` for a correct assignment.
 
@@ -75,6 +74,13 @@ The notebooks use the curated 9 features below in the five AUROC/AUPRC compariso
 | `neighbor_different_bin_fraction` | Fraction of directly connected graph neighbours assigned to a different initial bin. |
 | `bin_largest_graph_component_fraction` | Fraction of contigs in the assigned bin that fall in the largest connected component of that bin's induced graph subgraph. |
 
+
+## Other Notebooks
+
+- `notebooks/03_kmer_coverage_case_profiles.ipynb`
+- `notebooks/04_magpurify_metrics.ipynb`
+
+Notbeook 03 shows how the features differ in two incorrectly binned cases from the Sim-5G and Sim-10G datasets. Notebook 04 shows the comparison of the model results with results from [MAGPurify](https://github.com/snayfach/MAGpurify).
 
 ## Python API Sketch
 

@@ -50,14 +50,6 @@ The SHAP section in each model notebook also writes a standalone SHAP summary PN
 
 The feature-distribution section pools all discovered datasets and writes one standalone correct-vs-failed boxplot PNG per curated feature under `images/`. Raw 136-dimensional 4-mer vectors are collapsed into one `4mer_composition_distance` feature: the Euclidean distance from each contig's normalized canonical tetranucleotide-frequency vector to the centroid of contigs in the same initial bin. Raw coverage is represented for modeling as `coverage_difference`: the absolute difference between a contig's coverage and the mean coverage of contigs in the same initial bin. Significance asterisks are based on two-sided Mann-Whitney U tests with Benjamini-Hochberg FDR correction.
 
-The notebooks compare five bin feature sets:
-
-- `bin_nucleotide_only`: bin size/length, N50, GC summaries, and tetranucleotide-distance summaries
-- `bin_coverage_only`: bin coverage summaries and within-bin coverage-difference summaries
-- `bin_graph_only`: aggregate graph topology, graph-neighbour disagreement, and bin-induced graph coherence
-- `bin_nucleotide_coverage`
-- `bin_nucleotide_coverage_graph`
-
 ## Feature Reference
 
 The notebooks use the curated 9 features below in the five AUROC/AUPRC comparison sets and in the feature-distribution plots. The assembly graph is treated as an undirected contig graph. A graph neighbour means a contig directly connected to the current contig in the SPAdes graph. The raw SPAdes coverage value is parsed from the contig name and is used to calculate derived features, but raw `coverage` itself is not used as a model feature.
